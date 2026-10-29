@@ -1,6 +1,6 @@
 id = "dailrus.wled-matter"
 name = "WLED → Яндекс"
-version = "0.1.0"
+version = "0.2.0"
 entry = "main.lua"
 description = "Настройка моста WLED Matter: ленты и коды привязки для «Дома с Алисой»"
 permissions = ["web"]

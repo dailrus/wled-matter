@@ -18,6 +18,26 @@ use rs_matter::Matter;
 
 use socket2::{Domain, Protocol, Socket, Type};
 
+/// The LAN interface: `MATTER_IFACE` if set, else the one carrying the default route
+/// (`/proc/net/route`: destination 00000000), else wlan0. Station models differ (wlan0 on the
+/// minis, possibly eth0 or another name on wired ones).
+pub fn lan_interface() -> String {
+    if let Ok(iface) = std::env::var("MATTER_IFACE") {
+        if !iface.trim().is_empty() {
+            return iface;
+        }
+    }
+    std::fs::read_to_string("/proc/net/route")
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            (cols.len() > 1 && cols[1] == "00000000").then(|| cols[0].to_string())
+        })
+        .unwrap_or_else(|| "wlan0".to_string())
+}
+
 fn ipv4_of(iface: &str) -> Option<std::net::Ipv4Addr> {
     if_addrs::get_if_addrs().ok()?.into_iter().find_map(|ia| match ia.addr {
         if_addrs::IfAddr::V4(v4) if ia.name == iface => Some(v4.ip),

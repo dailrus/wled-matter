@@ -6,7 +6,7 @@
 //! color_light example; uses the SDK test attestation (VID 0xFFF1). Strips are configured from
 //! the web UI (see `http.rs`).
 //!
-//! Env: WLED_HOST (strip of a fresh install, 192.168.3.43), MATTER_IFACE (wlan0),
+//! Env: WLED_HOST (strip of a fresh install, none by default), MATTER_IFACE (default route's),
 //!      MATTER_STORAGE (/data/yam/var/wled_matter), HTTP_PORT (8097; 8098 is wled_anim,
 //!      8099 is Luna), RUST_LOG (info).
 
@@ -121,9 +121,10 @@ fn main() {
 
     let ctx: &'static Ctx = Box::leak(Box::new(Ctx {
         base: PathBuf::from(env("MATTER_STORAGE", "/data/yam/var/wled_matter")),
-        iface: env("MATTER_IFACE", "wlan0"),
-        default_host: env("WLED_HOST", "192.168.3.43"),
+        iface: mdns::lan_interface(),
+        default_host: env("WLED_HOST", ""),
     }));
+    info!("LAN interface {}, storage {}", ctx.iface, ctx.base.display());
     if let Err(e) = std::fs::create_dir_all(&ctx.base) {
         error!("{}: {e}", ctx.base.display());
         std::process::exit(1);

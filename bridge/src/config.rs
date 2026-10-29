@@ -6,9 +6,8 @@
 //!   <device id>/comm     "<passcode> <discriminator>" of that device
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use log::info;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -32,14 +31,15 @@ impl Config {
                 Err(e) => log::error!("{}: {e}; starting with defaults", path.display()),
             }
         }
-        let cfg = Config {
-            strips: vec![Strip {
+        // Fresh install: no strips (they are added in the web UI) unless WLED_HOST names one
+        let mut cfg = Config::default();
+        if !default_host.trim().is_empty() {
+            cfg.strips.push(Strip {
                 id: "s1".into(),
                 name: "WLED".into(),
-                host: default_host.into(),
-            }],
-        };
-        migrate_single_device(base);
+                host: default_host.trim().into(),
+            });
+        }
         let _ = cfg.save(base);
         cfg
     }
@@ -77,27 +77,6 @@ impl Config {
     pub fn strip(&self, id: &str) -> Option<&Strip> {
         self.strips.iter().find(|s| s.id == id)
     }
-}
-
-/// Before multi-device support the single strip kept its KV files directly in the storage dir
-/// and used the SDK test passcode; move them under `s1/` so its Yandex pairing survives.
-fn migrate_single_device(base: &Path) {
-    let Ok(entries) = fs::read_dir(base) else { return };
-    let files: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && p.file_name().is_some_and(|n| n != "config.json"))
-        .collect();
-    if files.is_empty() {
-        return;
-    }
-    let dir = base.join("s1");
-    let _ = fs::create_dir_all(&dir);
-    for f in files {
-        let _ = fs::rename(&f, dir.join(f.file_name().unwrap()));
-    }
-    let _ = fs::write(dir.join("comm"), "20202021 3840");
-    info!("Migrated the existing pairing to device s1");
 }
 
 /// Passcode + discriminator of a device, generated once and kept with its pairing.

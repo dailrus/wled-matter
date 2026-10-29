@@ -2178,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "wled-matter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-io",
  "async-signal",
