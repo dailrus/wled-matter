@@ -1,0 +1,14 @@
+name: dailrus/wled-matter
+version: 0.1.0
+license: MIT AND Apache-2.0
+description: WLED Matter (wled_matter) — ленты WLED как Matter-лампы в «Доме с Алисой»; веб-интерфейс на порту 8097 и вкладка в Luna
+targets: [yandexmini_2]
+recommends: [yam/luna]
+files:
+  bin/wled_matter: bin/wled_matter
+  bin/wled_matterd: bin/wled_matterd
+  share/luna/plugins/dailrus.wled-matter/: luna/
+services:
+  wled-matter:
+    exec: [bin/wled_matter, start]
+    oneshot: true

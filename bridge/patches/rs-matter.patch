@@ -1,0 +1,128 @@
+diff --git a/rs-matter/src/dm/clusters/gen_diag.rs b/rs-matter/src/dm/clusters/gen_diag.rs
+index aed1e95..3752873 100644
+--- a/rs-matter/src/dm/clusters/gen_diag.rs
++++ b/rs-matter/src/dm/clusters/gen_diag.rs
+@@ -24,7 +24,7 @@ use core::num::NonZeroU8;
+ use crate::dm::{ArrayAttributeRead, Cluster, Dataver, InvokeContext, ReadContext};
+ use crate::error::{Error, ErrorCode};
+ use crate::im::ImStats;
+-use crate::tlv::{Nullable, Octets, TLVBuilder, TLVBuilderParent};
++use crate::tlv::{Nullable, Octets, TLVBuilder, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder};
+ use crate::utils::epoch::MATTER_EPOCH_SECS;
+ use crate::utils::sync::MaybeSendSync;
+ use crate::with;
+@@ -222,6 +222,9 @@ impl ClusterHandler for GenDiagHandler<'_> {
+                 | AttributeId::TotalOperationalHours
+                 | AttributeId::BootReason
+                 | AttributeId::DeviceLoadStatus
++                | AttributeId::ActiveHardwareFaults
++                | AttributeId::ActiveRadioFaults
++                | AttributeId::ActiveNetworkFaults
+         ))
+         .with_cmds(with!(CommandId::TestEventTrigger | CommandId::TimeSnapshot));
+ 
+@@ -272,6 +275,43 @@ impl ClusterHandler for GenDiagHandler<'_> {
+         }
+     }
+ 
++    // Optional fault lists; some controllers (e.g. Yandex) subscribe to them. No faults are ever reported.
++    fn active_hardware_faults<P: TLVBuilderParent>(
++        &self,
++        _ctx: impl ReadContext,
++        builder: ArrayAttributeRead<ToTLVArrayBuilder<P, HardwareFaultEnum>, ToTLVBuilder<P, HardwareFaultEnum>>,
++    ) -> Result<P, Error> {
++        match builder {
++            ArrayAttributeRead::ReadAll(builder) => builder.end(),
++            ArrayAttributeRead::ReadOne(_, _) => Err(ErrorCode::ConstraintError.into()),
++            ArrayAttributeRead::ReadNone(builder) => builder.end(),
++        }
++    }
++
++    fn active_radio_faults<P: TLVBuilderParent>(
++        &self,
++        _ctx: impl ReadContext,
++        builder: ArrayAttributeRead<ToTLVArrayBuilder<P, RadioFaultEnum>, ToTLVBuilder<P, RadioFaultEnum>>,
++    ) -> Result<P, Error> {
++        match builder {
++            ArrayAttributeRead::ReadAll(builder) => builder.end(),
++            ArrayAttributeRead::ReadOne(_, _) => Err(ErrorCode::ConstraintError.into()),
++            ArrayAttributeRead::ReadNone(builder) => builder.end(),
++        }
++    }
++
++    fn active_network_faults<P: TLVBuilderParent>(
++        &self,
++        _ctx: impl ReadContext,
++        builder: ArrayAttributeRead<ToTLVArrayBuilder<P, NetworkFaultEnum>, ToTLVBuilder<P, NetworkFaultEnum>>,
++    ) -> Result<P, Error> {
++        match builder {
++            ArrayAttributeRead::ReadAll(builder) => builder.end(),
++            ArrayAttributeRead::ReadOne(_, _) => Err(ErrorCode::ConstraintError.into()),
++            ArrayAttributeRead::ReadNone(builder) => builder.end(),
++        }
++    }
++
+     fn reboot_count(&self, ctx: impl ReadContext) -> Result<u16, Error> {
+         Ok(ctx.exchange().matter().reboot_count())
+     }
+diff --git a/rs-matter/src/im.rs b/rs-matter/src/im.rs
+index 1133ea7..702e4ec 100644
+--- a/rs-matter/src/im.rs
++++ b/rs-matter/src/im.rs
+@@ -1044,44 +1044,40 @@ where
+         // contains existing endpoints, clusters and attributes, and if not
+         // we should (a bit surprisingly) return InvalidAction
+ 
++        // Patched for controllers (e.g. Yandex) that batch optional/unsupported paths together
++        // with supported ones: reject only when *no* path matches anything (that is what the
++        // spec and the C++ SDK do); unsupported concrete paths are reported as statuses in the
++        // priming report instead.
+         self.handler.access(|node| {
+-            let mut has_attrs = false;
+-            let mut has_events = false;
++            let mut any_valid = false;
+ 
+             if let Some(attr_requests) = req.attr_requests()? {
+-                has_attrs = true;
+-
+                 for attr_req in attr_requests {
+                     let path = attr_req?;
+ 
+                     if path.is_wildcard() {
+                         Self::validate_attr_wildcard_path(&path)?;
+ 
+-                        if !node.has_accessible_attr(&path, accessor) {
+-                            return Err(ErrorCode::InvalidAction.into());
++                        if node.has_accessible_attr(&path, accessor) {
++                            any_valid = true;
+                         }
+-                    } else {
+-                        node.validate_attr_path(&path, false, false, accessor)
+-                            .map_err(|_| ErrorCode::InvalidAction)?;
++                    } else if node.validate_attr_path(&path, false, false, accessor).is_ok() {
++                        any_valid = true;
+                     }
+                 }
+             }
+ 
+             if let Some(event_reqs) = req.event_requests()? {
+-                has_events = true;
+-
+                 for event_req in event_reqs {
+                     let path = event_req?;
+ 
+-                    if !path.is_wildcard() {
+-                        node.validate_event_path(&path, accessor)
+-                            .map_err(|_| ErrorCode::InvalidAction)?;
++                    if path.is_wildcard() || node.validate_event_path(&path, accessor).is_ok() {
++                        any_valid = true;
+                     }
+                 }
+             }
+ 
+-            if !has_attrs && !has_events {
+-                // Empty subscribe requests are not allowed either
++            if !any_valid {
+                 return Err(ErrorCode::InvalidAction.into());
+             }
+ 

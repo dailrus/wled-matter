@@ -1,0 +1,8 @@
+#!/bin/sh
+# WLED Matter (yam-пакет dailrus/wled-matter): yam сам службы не запускает.
+# Положить в /etc/init.d (корень смонтирован только для чтения: mount -o remount,rw /).
+B=/data/yam/bin/wled_matter
+[ -f "$B" ] || exit 0
+case "${1:-start}" in
+start|stop|restart) exec sh "$B" "$1" ;;
+esac

@@ -1,0 +1,60 @@
+#!/bin/sh
+# WLED Matter (yam-пакет dailrus/wled-matter): wled_matter start | stop | restart | status | log [N]
+#   Мост: каждая лента WLED — отдельное Matter-устройство (лампа) для «Дома с Алисой».
+#   Веб-интерфейс: http://<станция>:8097 (и вкладка «WLED → Яндекс» в Luna, если она стоит).
+# Ленты и привязки: /data/yam/var/wled_matter (config.json + каталог на ленту).
+ROOT=${YAM_ROOT:-/data/yam}
+VAR=$ROOT/var/wled_matter
+RUN=/tmp/wled_matter
+BIN=$ROOT/bin/wled_matterd   # сам мост; yam даёт право на запуск только файлам из bin/
+LOG=$RUN/bridge.log
+LOG_MAX=524288
+
+bridge_pids() { pidof wled_matterd; }
+
+running() {
+  pid=$(cat "$RUN/bridge.pid" 2>/dev/null)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+stop_bridge() {
+  pid=$(cat "$RUN/bridge.pid" 2>/dev/null)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null       # цикл-перезапускатель
+  rm -f "$RUN/bridge.pid"
+  for p in $(bridge_pids); do kill "$p" 2>/dev/null; done
+}
+
+case "${1:-}" in
+start)
+  running && { echo "WLED Matter уже запущен"; exit 0; }
+  # мост, запущенный вручную или прежней версией, держит те же порты
+  for p in $(bridge_pids); do kill "$p" 2>/dev/null; done
+  mkdir -p "$VAR" "$RUN"
+  [ -f "$LOG" ] && [ "$(wc -c <"$LOG")" -gt "$LOG_MAX" ] && : >"$LOG"
+  export MATTER_STORAGE="$VAR" RUST_LOG="${RUST_LOG:-info,rs_matter=warn}"
+  # Перезапуск при падении; лог обрезается, чтобы не забить /tmp
+  start-stop-daemon -S -b -m -p "$RUN/bridge.pid" -x /bin/sh -- -c "
+    while :; do
+      [ \"\$(wc -c <'$LOG' 2>/dev/null || echo 0)\" -gt $LOG_MAX ] && : >'$LOG'
+      '$BIN' >>'$LOG' 2>&1
+      sleep 5
+    done"
+  echo "WLED Matter запущен, интерфейс: http://$(ip -4 addr show wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p'):8097"
+  ;;
+stop)
+  stop_bridge
+  echo "WLED Matter остановлен"
+  ;;
+restart)
+  stop_bridge; sleep 1; exec "$0" start
+  ;;
+status)
+  if running; then echo "мост: работает ($(bridge_pids | tr '\n' ' '))"; else echo "мост: остановлен"; fi
+  ;;
+log)
+  tail -n "${2:-50}" "$LOG"
+  ;;
+*)
+  echo "использование: wled_matter start | stop | restart | status | log [N]" >&2; exit 2
+  ;;
+esac

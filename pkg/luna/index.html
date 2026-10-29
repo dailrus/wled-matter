@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WLED Matter</title>
+<style>
+:root{--bg:#10131a;--card:#1b2230;--fg:#e8edf7;--a:#4ea1ff;--m:#8b97ab;--l:#2b3648}
+*{box-sizing:border-box}
+body{margin:0;padding:12px;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,"Segoe UI",Roboto,Arial,sans-serif}
+header,main{max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+h1{margin:0;font-size:17px}
+#msg{margin:0;min-height:17px;font-size:12px;color:var(--m)}
+#msg.err,.hint.err{color:#ff8d8d}
+.card{background:var(--card);border-radius:10px;padding:10px 12px 12px;margin-bottom:10px}
+h2{margin:2px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--m)}
+label{display:block;margin:10px 0 4px;font-size:12.5px;color:var(--m)}
+input[type=text],input[type=number],select{width:100%;padding:8px;border:1px solid var(--l);border-radius:8px;background:#131a26;color:var(--fg);font-size:14px}
+input[type=range]{display:block;width:100%;margin:0;accent-color:var(--a)}
+input[type=color]{display:block;width:100%;height:40px;padding:2px;border:1px solid var(--l);border-radius:8px;background:#131a26}
+button{padding:8px 11px;border:1px solid #33425c;border-radius:8px;background:#233049;color:var(--fg);font-size:13px}
+button:active{background:var(--a);border-color:var(--a);color:#0b1220}
+[hidden]{display:none!important}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cols label{margin-top:8px}
+a.btn{display:inline-block;padding:8px 11px;border:1px solid #33425c;border-radius:8px;background:#233049;color:var(--fg);font-size:13px;text-decoration:none}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg label{position:relative;display:inline-flex;margin:0;font-size:13px;color:var(--fg)}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg span{display:block;padding:7px 12px;border:1px solid #33425c;border-radius:99px;background:#151d2a}
+.seg input:checked+span{background:var(--a);border-color:var(--a);color:#0b1220}
+.seg input:focus-visible+span{outline:2px solid var(--a);outline-offset:2px}
+.chk{display:flex;align-items:center;gap:8px;margin:10px 0 0;font-size:13.5px;color:var(--fg)}
+.chk input{width:18px;height:18px;margin:0;accent-color:var(--a)}
+.fld{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.fld label{margin:10px 0 4px}
+.fld output{font-size:12px;color:var(--a)}
+.hint{margin:10px 0 0;font-size:12px;color:var(--m);word-break:break-word}
+footer{max-width:560px;margin:4px auto 8px;text-align:center;font-size:12px;color:var(--m)}
+footer a{color:var(--a);text-decoration:none}
+.nodes{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.nodes button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left}
+button:disabled{opacity:.5}
+.pair{margin-top:10px;border-top:1px solid var(--l);padding-top:8px}
+.pair .hint{margin:0}
+.pstat{margin:0;font-size:12.5px;color:var(--m)}
+.pstat.on{color:var(--a)}
+.code{margin:6px 0 0;font:18px/1.3 ui-monospace,Consolas,"Courier New",monospace;letter-spacing:.06em;word-break:break-all}
+.qr{display:block;width:180px;height:180px;margin-top:10px;padding:8px;border-radius:8px;background:#fff}
+</style>
+</head>
+<body>
+<header>
+<h1>WLED Matter</h1>
+<p id="msg" role="status" aria-live="polite"></p>
+</header>
+<main>
+<section class="card">
+<h2>Как привязать</h2>
+<p class="hint">«Дом с Алисой» → «+» → «Устройство умного дома» → Matter → отсканируйте QR или введите код ленты ниже.</p>
+</section>
+<div id="strips"></div>
+<section class="card">
+<h2>Ленты</h2>
+<div class="row">
+<button type="button" id="btnAdd">+ Лента</button>
+<button type="button" id="btnSave" disabled>Сохранить</button>
+</div>
+<p class="hint" id="saveInfo"></p>
+</section>
+</main>
+<footer><a href="https://github.com/dailrus/wled-matter" target="_blank" rel="noopener">WLED Matter</a> <span id="ver"></span> · автор <a href="https://github.com/dailrus" target="_blank" rel="noopener">dailrus</a></footer>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id), on=(e,t,f)=>e.addEventListener(t,f), enc=encodeURIComponent;
+const BASE=location.pathname.startsWith('/web/')?location.protocol+'//'+location.hostname+':8097/':'';
+let state={version:'',restarting:false,strips:[],devices:[],wled_anim:null};
+let local=[],cards=[],dirty=false,busy=false,pt=0,mt=0;
+const mkBtn=t=>{const b=document.createElement('button');b.type='button';if(t)b.textContent=t;return b;};
+const msg=(t,err)=>{const m=$('msg');m.textContent=t;m.className=err?'err':'';clearTimeout(mt);
+ if(t)mt=setTimeout(()=>{m.textContent='';m.className='';},2000);};
+const ipOk=s=>{
+ const m=/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s||'').trim());
+ return !!m&&[1,2,3,4].every(i=>+m[i]<=255);
+};
+const setHint=(c,t,err)=>{c.info.textContent=t;c.info.className='hint'+(err?' err':'');};
+const syncDirty=()=>{
+ $('btnSave').disabled=!dirty;
+ const i=$('saveInfo');
+ i.textContent=dirty?'Есть несохранённые изменения':'';
+ i.className='hint';
+};
+const mark=()=>{dirty=true;syncDirty();};
+
+function getJSON(u){
+ return fetch(BASE+u,{cache:'no-store'}).then(r=>r.text().then(t=>{
+  let d=null;try{d=JSON.parse(t);}catch(e){}
+  if(!r.ok||!d)throw new Error(d&&d.error?d.error:'HTTP '+r.status);
+  if(d.ok===false)throw new Error(d.error||'Ошибка моста');
+  return d;
+ }),()=>{throw new Error('Мост не отвечает');});
+}
+function postJSON(u,body){
+ return fetch(BASE+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  .then(r=>r.text().then(t=>{
+   let d={};try{d=JSON.parse(t);}catch(e){}
+   if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));
+   return d;
+  }),()=>{throw new Error('Мост не отвечает');});
+}
+function setVer(){ $('ver').textContent=state&&state.version?'v'+state.version:''; }
+
+function nextId(){
+ const used={};
+ local.forEach(x=>{used[String(x.id)]=1;});
+ (state.strips||[]).forEach(x=>{if(x&&x.id)used[String(x.id)]=1;});
+ let n=1;
+ while(used['s'+n])n++;
+ return 's'+n;
+}
+function newItem(){ return {id:nextId(),name:'Лента '+(local.length+1),host:''}; }
+
+function loadLocal(s){
+ const a=(s&&Array.isArray(s.strips))?s.strips:[];
+ local=a.map(x=>({id:String((x&&x.id)||''),name:String((x&&x.name)||''),host:String((x&&x.host)||'')})).filter(x=>x.id);
+ if(!local.length)local=[newItem()];
+}
+
+const animUrl=()=>location.protocol+'//'+location.hostname+':8098/';
+function animSaved(c){
+ const host=String(c.item.host||'').trim();
+ return !!host&&(state.strips||[]).some(s=>s&&String(s.id)===String(c.item.id)&&String(s.host||'').trim()===host);
+}
+function updateAnim(c){
+ const an=state&&state.wled_anim;
+ const host=String(c.item.host==null?'':c.item.host);
+ if(!an||!an.installed||!animSaved(c)){c.anim.hidden=true;return;}
+ const here=String(an.ip)===host.trim();
+ c.anim.hidden=false;
+ c.astat.hidden=!here;
+ c.aopen.hidden=!here;
+ c.banim.hidden=here;
+ if(here)c.astat.textContent='Светомузыка WLED Animation идёт на эту ленту ✓';
+}
+function updatePair(c){
+ updateAnim(c);
+ const id=String(c.item.id);
+ const dev=(state.devices||[]).find(d=>d&&String(d.id)===id);
+ const has=!!dev;
+ c.ph.hidden=has;
+ c.pstat.hidden=!has;
+ c.pcode.hidden=!has;
+ c.prow.hidden=!has;
+ if(!has){
+  c.img.hidden=true;c.qrOpen=false;c.qrKey='';c.bQr.hidden=true;
+  return;
+ }
+ const on=!!dev.commissioned, code=String(dev.code||'');
+ c.pstat.textContent=on?'Привязано ✓':'Ждёт привязки';
+ c.pstat.className='pstat'+(on?' on':'');
+ c.pcode.textContent=code;
+ c.pcode.hidden=!code;
+ const key=id+'|'+code+'|'+(on?1:0);
+ if(key!==c.qrKey){
+  c.qrKey=key;c.qrErr=false;
+  if(!on)c.qrOpen=false;
+  c.img.src=BASE+'api/qr/'+enc(id)+'.svg'+(code?'?v='+enc(code):'');
+ }
+ c.img.hidden=c.qrErr||(on?!c.qrOpen:false);
+ c.bQr.hidden=!on;
+ c.bQr.textContent=c.qrOpen?'Скрыть QR':'Показать QR';
+}
+
+function makeCard(item){
+ const el=document.createElement('section');el.className='card';
+ const h2=document.createElement('h2');h2.textContent=item.name||'Лента';
+ const l1=document.createElement('label');l1.htmlFor='n_'+item.id;l1.textContent='Название';
+ const inName=document.createElement('input');inName.type='text';inName.id='n_'+item.id;
+ inName.autocomplete='off';inName.spellcheck=false;inName.value=item.name||'';
+ const l2=document.createElement('label');l2.htmlFor='h_'+item.id;l2.textContent='IP-адрес ленты';
+ const inHost=document.createElement('input');inHost.type='text';inHost.id='h_'+item.id;inHost.inputMode='decimal';
+ inHost.autocomplete='off';inHost.spellcheck=false;inHost.placeholder='192.168.1.50';inHost.value=item.host||'';
+ const row=document.createElement('div');row.className='row';
+ const bChk=mkBtn('Проверить'),bFind=mkBtn('Найти в сети'),bDel=mkBtn('Удалить');
+ row.append(bChk,bFind,bDel);
+ const info=document.createElement('p');info.className='hint';
+ const ul=document.createElement('ul');ul.className='nodes';ul.hidden=true;
+ const anim=document.createElement('div');anim.className='pair';anim.hidden=true;
+ const ah=document.createElement('h2');ah.textContent='Светомузыка';
+ const astat=document.createElement('p');astat.className='pstat on';
+ const arow=document.createElement('div');arow.className='row';
+ const aopen=document.createElement('a');aopen.className='btn';aopen.textContent='Открыть WLED Animation';
+ aopen.href=animUrl();aopen.target='_blank';aopen.rel='noopener';
+ const banim=mkBtn('Для светомузыки');
+ arow.append(aopen,banim);
+ anim.append(ah,astat,arow);
+ const pair=document.createElement('div');pair.className='pair';
+ const ph=document.createElement('p');ph.className='hint';ph.textContent='Код появится после сохранения';
+ const pstat=document.createElement('p');pstat.className='pstat';
+ const pcode=document.createElement('p');pcode.className='code';
+ const prow=document.createElement('div');prow.className='row';
+ const bQr=mkBtn('Показать QR'),bUn=mkBtn('Сбросить привязку');
+ prow.append(bQr,bUn);
+ const img=document.createElement('img');img.className='qr';img.alt='QR-код привязки';img.hidden=true;
+ pair.append(ph,pstat,pcode,prow,img);
+ el.append(h2,l1,inName,l2,inHost,row,info,ul,anim,pair);
+ const c={item,el,h2,inName,inHost,info,ul,anim,astat,aopen,banim,ph,pstat,pcode,prow,bQr,bUn,img,qrOpen:false,qrKey:'',qrErr:false};
+
+ on(inName,'input',()=>{c.item.name=inName.value;h2.textContent=inName.value.trim()||'Лента';mark();});
+ on(inHost,'input',()=>{c.item.host=inHost.value;mark();});
+ on(bChk,'click',()=>checkStrip(c));
+ on(bFind,'click',()=>findNodes(c));
+ on(banim,'click',()=>{
+  banim.disabled=true;
+  postJSON('api/wled-anim',{id:String(c.item.id)}).then(()=>{
+   msg('IP передан в WLED Animation ✓');
+   return refreshState();
+  },e=>msg('Ошибка: '+e.message,1)).then(()=>{banim.disabled=false;});
+ });
+ on(bDel,'click',()=>{
+  if(!confirm('Удалить ленту «'+(String(c.item.name||'').trim()||'без названия')+'»?'))return;
+  local=local.filter(x=>x!==c.item);
+  dirty=true;render();
+ });
+ on(bQr,'click',()=>{c.qrOpen=!c.qrOpen;updatePair(c);});
+ on(bUn,'click',()=>unpair(c));
+ on(img,'error',()=>{c.qrErr=true;img.hidden=true;});
+
+ updatePair(c);
+ cards.push(c);
+ return el;
+}
+
+function render(){
+ const box=$('strips');
+ box.textContent='';
+ cards=[];
+ local.forEach(it=>box.append(makeCard(it)));
+ syncDirty();
+}
+
+function checkStrip(c){
+ const ip=String(c.inHost.value||'').trim();
+ if(!ipOk(ip)){setHint(c,'Некорректный IPv4: нужно 4 числа 0–255',1);return;}
+ setHint(c,'Проверяю '+ip+'…');
+ getJSON('api/wled?host='+enc(ip)).then(d=>{
+  if(!d||d.ok===false)throw new Error((d&&d.error)||'WLED не отвечает');
+  const n=+(d.leds||0);
+  const p=[String(d.name||''),String(d.ver||'')];
+  if(n)p.push(n+' светодиодов');
+  setHint(c,p.filter(Boolean).join(' · ')||'WLED отвечает');
+ },e=>setHint(c,e.message,1));
+}
+function findNodes(c){
+ const ip=String(c.inHost.value||'').trim();
+ if(!ipOk(ip)){setHint(c,'Некорректный IPv4: нужно 4 числа 0–255',1);return;}
+ c.ul.hidden=true;c.ul.textContent='';
+ setHint(c,'Ищу устройства в сети…');
+ getJSON('api/nodes?host='+enc(ip)).then(d=>{
+  if(!d||d.ok===false)throw new Error((d&&d.error)||'Не удалось найти устройства');
+  const a=Array.isArray(d.nodes)?d.nodes:[];
+  if(!a.length){setHint(c,'Других устройств не найдено');return;}
+  setHint(c,'Найдено: '+a.length+'. Нажмите на устройство, чтобы выбрать');
+  a.forEach(nd=>{
+   const li=document.createElement('li'),b=mkBtn('');
+   const s1=document.createElement('span'),s2=document.createElement('span');
+   s1.textContent=String((nd&&nd.name)||'WLED');
+   s2.textContent=String((nd&&nd.ip)||'');s2.style.color='var(--m)';
+   b.append(s1,s2);
+   on(b,'click',()=>{
+    c.inHost.value=String((nd&&nd.ip)||'');
+    c.item.host=c.inHost.value;
+    c.ul.hidden=true;c.ul.textContent='';
+    mark();
+    checkStrip(c);
+   });
+   li.append(b);c.ul.append(li);
+  });
+  c.ul.hidden=false;
+ },e=>setHint(c,e.message,1));
+}
+function unpair(c){
+ if(!confirm('Лента пропадёт из «Дома с Алисой» и получит новый код. Продолжить?'))return;
+ c.bUn.disabled=true;
+ postJSON('api/unpair',{id:c.item.id}).then(()=>{
+  msg('Привязка сброшена ✓');
+  c.qrOpen=false;
+  setTimeout(refreshState,700);
+  setTimeout(refreshState,2200);
+ },e=>msg('Ошибка: '+e.message,1)).then(()=>{c.bUn.disabled=false;});
+}
+
+function refreshPairs(){ cards.forEach(updatePair); }
+function refreshState(){
+ if(busy)return Promise.resolve();
+ return getJSON('api/state').then(s=>{
+  state=s;setVer();refreshPairs();
+ },()=>{});
+}
+
+function collect(){
+ cards.forEach(c=>{c.item.name=c.inName.value;c.item.host=c.inHost.value;});
+}
+function save(){
+ collect();
+ const seen={};
+ for(let i=0;i<local.length;i++){
+  const it=local[i],name=String(it.name||'').trim(),host=String(it.host||'').trim();
+  if(!name){msg('Укажите название ленты',1);return;}
+  if(!ipOk(host)){msg('Некорректный IPv4: нужно 4 числа 0–255',1);return;}
+  if(seen[host]){msg('IP повторяется: '+host,1);return;}
+  seen[host]=1;
+ }
+ const body={strips:local.map(it=>({id:String(it.id),name:String(it.name||'').trim(),host:String(it.host||'').trim()}))};
+ busy=true;$('btnSave').disabled=true;
+ postJSON('api/config',body).then(()=>{
+  dirty=false;syncDirty();
+  msg('Сохранено ✓');
+  pollRestart();
+ },e=>{busy=false;syncDirty();msg('Ошибка: '+e.message,1);});
+}
+function pollRestart(){
+ clearTimeout(pt);
+ let tries=0;
+ const tick=()=>{
+  tries++;
+  getJSON('api/state').then(s=>{
+   state=s;setVer();refreshPairs();
+   if(s&&s.restarting&&tries<20){pt=setTimeout(tick,1000);return;}
+   busy=false;
+   loadLocal(s);
+   render();
+   dirty=false;syncDirty();
+  },()=>{
+   if(tries<20){pt=setTimeout(tick,1000);return;}
+   busy=false;dirty=false;syncDirty();
+  });
+ };
+ pt=setTimeout(tick,700);
+}
+
+on($('btnAdd'),'click',()=>{
+ local.push(newItem());
+ dirty=true;render();
+});
+on($('btnSave'),'click',save);
+
+getJSON('api/state').then(s=>{
+ state=s;setVer();
+ loadLocal(s);
+ render();
+},e=>{
+ msg('Ошибка загрузки: '+e.message,1);
+ loadLocal(null);
+ render();
+});
+
+setInterval(()=>{
+ if(busy)return;
+ getJSON('api/state').then(s=>{
+  state=s;setVer();refreshPairs();
+ },()=>{});
+},5000);
+})();
+</script>
+</body>
+</html>

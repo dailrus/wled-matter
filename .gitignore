@@ -1,0 +1,19 @@
+# собранные пакеты публикуются в GitHub Releases
+dist/
+*.yampkg
+# инструменты и сборка (портативный Rust/zig/Node, клоны rs-matter, yam, luna)
+tools/
+node-v*/
+node_modules/
+bridge/target/
+.matter/
+# собирается из bridge/ (см. README)
+pkg/bin/wled_matterd
+# прототипы на Node и служебное
+wled-light.js
+package*.json
+*.png
+*.log
+ds_web_result.txt
+bridge/web/ref_wled_anim.html
+bridge/web/TASK.md
